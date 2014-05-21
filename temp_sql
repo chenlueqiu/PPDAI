@@ -1,0 +1,107 @@
+case "-1":
+                lblValidateMobile.Text = "数据迁移";
+                lblValidateMobile.ForeColor = Color.Red;
+                break;
+            case "0":
+                lblValidateMobile.Text = "审核失败";
+                lblValidateMobile.ForeColor = Color.Red;
+                lblValidateMobileStatus.Text = "已提交";
+                break;
+            case "1":
+                lblValidateMobile.Text = "成功";
+                lblValidateMobile.ForeColor = Color.Green;
+                lblValidateMobileStatus.Text = "已提交";
+                break;
+            case "2":
+                if (isView == "1")
+                {
+                    lblValidateMobile.Text = "待审已提征信";
+                }
+                else
+                {
+                    lblValidateMobile.Text = "待审未提征信";
+                    
+                }
+                lblValidateMobile.ForeColor = Color.Red;
+                lblValidateMobileStatus.Text = "已提交";
+                break;
+            default:
+                lblValidateMobile.Text = "无";
+                lblValidateMobileStatus.Text = "无";
+                break;
+
+
+
+
+public static DataTable GetUserVaidateForVideoPhoneWebsite(int userID)
+        {
+            string commandText = @"declare @taobaoValidateInfo int,@VideoValidateInfo int,@PhoneValidateInfo int,@IsView int,@CreationDate DateTime 
+SELECT top 1 @taobaoValidateInfo=VerifyStatusId FROM ppdai.dbo.Profile_Websites WHERE UserId=@UserID AND WebsiteId=2 ORDER BY CreationDate DESC
+SELECT top 1 @PhoneValidateInfo=ValidateStatusId,@IsView=IsView,@CreationDate=CreationDate FROM ppdai_vd.dbo.PhoneValidateRegs WHERE UserId=@UserID ORDER BY CreationDate DESC
+SELECT @VideoValidateInfo=COUNT(*) FROM [ppdai_audit].[dbo].[AuditListImg] where TypeID=100 and UserID=@UserID
+select @taobaoValidateInfo,@PhoneValidateInfo,@VideoValidateInfo,@IsView,@CreationDate as CreationDate";
+            SqlParameter[] paramList =
+                {
+                    SqlHelper.MakeInParam("@UserID", SqlDbType.Int, 4, userID),
+                };
+            return SqlHelper.ExecuteDataTable(Framework.Config.MainConnectionString, commandText, paramList);
+        }
+        
+        
+        
+1.    
+select count(distinct pvrg.userid) --
+from ppdai_vd..PhoneValidateRegs pvrg
+--inner join ppd..userdetails ud on pvrg.userid = ud.userid
+where pvrg.ValidateStatusId = 2 --待审
+
+select l.listingid, l.newlisttypeid2, l.borrowerid
+ROW_NUMBER() OVER(PARTITION BY l.borrowerid ORDER BY l.listingid DESC) num
+into #tmp1
+from ppdai..listing l 
+
+select #tmp1.newlisttypeid2, count(distinct pvrg.userid) --
+from ppdai_vd..PhoneValidateRegs pvrg
+left join #tmp1 on pvrg.userid = #tmp1.borrowerid and #tmp1.num = 1
+where pvrg.ValidateStatusId = 2 --待审
+group by #tmp1.newlisttypeid2
+
+2.
+select pvrg.userid, pvrg.validatedate
+row_number() over(partition by pvrg.userid order by pvrg.validatedate desc) num
+into #tmp2
+from ppdai_vd..phonevalidateregs pvrg
+where pvrg.validatestatusid = 1
+
+select count(distinct pvrg.userid) as cnt1,
+sum(case when #tmp2.validatedate is not null and datediff(day, #tmp2.validatedate, pvrg.validatedate) < 90
+then 1 else 0 end) as cnt2
+from ppdai_vd..phonevalidateregs pvrg
+left join #tmp2 on pvrg.userid = #tmp2.userid and #tmp2.num = 1
+where pvrg.validatestatusid = 2
+
+3.
+select pvrg.userid, pvrg.validatedate, pvrg.validatestatusid
+row_number() over(partition by pvrg.userid order by pvrg.validatedate desc) num
+into #tmp3
+from ppdai_vd..phonevalidateregs pvrg
+
+
+select *
+from ppdai_vd..creditinvestigatecases cic
+inner join ppdai..listing l on cic.listingid = l.listingid
+inner join #tmp3 on l.borrowerid = #tmp3.userid
+where cic.creditstatusid = 3 and #tmp3.validatestatusid = 2
+
+4.
+select sum(case when datediff(day, cic.creationdate, getdate()) >= 5 then 1 else 0 end) as cnt
+from ppdai_vd..creditinvestigatecases cic
+where cic.validatestatusid = 2
+
+
+
+
+
+
+
+
