@@ -90,7 +90,7 @@ from ppdai_vd..phonevalidateregs pvrg
 select *
 from ppdai_vd..creditinvestigatecases cic
 inner join ppdai..listing l on cic.listingid = l.listingid
-inner join #tmp3 on l.borrowerid = #tmp3.userid
+inner join #tmp3 on l.borrowerid = #tmp3.userid and #tmp3.num = 1
 where cic.creditstatusid = 3 and #tmp3.validatestatusid = 2
 
 4.
