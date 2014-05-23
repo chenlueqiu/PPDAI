@@ -49,54 +49,137 @@ select @taobaoValidateInfo,@PhoneValidateInfo,@VideoValidateInfo,@IsView,@Creati
         
         
         
-1.    
-select count(distinct pvrg.userid) --
+
+select distinct pw.UserId --通过网商认证的用户
+into #webuser --select * from #webuser --drop table #webuser
+from ppdai..Profile_Websites pw
+where pw.WebsiteId in (2, 5, 10, 11)
+and pw.IsDeleted = 0 and VerifyStatusID = 1
+
+--/******1.
+select pvrg.ValidateStatusId, pvrg.IsView, count(distinct pvrg.userid) cnt --3323
 from ppdai_vd..PhoneValidateRegs pvrg
 --inner join ppd..userdetails ud on pvrg.userid = ud.userid
-where pvrg.ValidateStatusId = 2 --待审
+where pvrg.ValidateStatusId = 2 and pvrg.IsView = 1 --征信待审的手机认证
+group by pvrg.ValidateStatusId, pvrg.IsView
 
-select l.listingid, l.newlisttypeid2, l.borrowerid
-ROW_NUMBER() OVER(PARTITION BY l.borrowerid ORDER BY l.listingid DESC) num
-into #tmp1
-from ppdai..listing l 
+--根据用户最后一次列表判断用户类型（一次/过渡）
+select l.listingid, l.newlisttypeid2, l.borrowerid, l.creationdate, 
+ROW_NUMBER() OVER(PARTITION BY l.borrowerid ORDER BY l.listingid DESC) as num
+into #tmp1 --select * from #tmp1 --drop table #tmp1
+from ppdai..listing l
 
-select #tmp1.newlisttypeid2, count(distinct pvrg.userid) --
+select #tmp1.newlisttypeid2, count(distinct pvrg.userid) --8(3295) / 9(12) / (3323 - 3295 - 12 = 16)
 from ppdai_vd..PhoneValidateRegs pvrg
 left join #tmp1 on pvrg.userid = #tmp1.borrowerid and #tmp1.num = 1
-where pvrg.ValidateStatusId = 2 --待审
+where pvrg.ValidateStatusId = 2 and pvrg.IsView = 1 --征信待审的手机认证
 group by #tmp1.newlisttypeid2
 
-2.
-select pvrg.userid, pvrg.validatedate
-row_number() over(partition by pvrg.userid order by pvrg.validatedate desc) num
-into #tmp2
-from ppdai_vd..phonevalidateregs pvrg
-where pvrg.validatestatusid = 1
+select count(distinct pvrg.UserId) --14
+from ppdai_vd..PhoneValidateRegs pvrg
+inner join #webuser on pvrg.UserId = #webuser.UserId 
+and pvrg.ValidateStatusId = 2 and pvrg.IsView = 1
 
+
+
+--/******2.
+select pvrg.userid, pvrg.validatedate,
+row_number() over(partition by pvrg.userid order by pvrg.validatedate desc) num
+into #tmp2 --select * from #tmp2 --drop table #tmp2
+from ppdai_vd..phonevalidateregs pvrg
+where pvrg.validatestatusid = 1 --通过的手机认证
+
+--3323 / 74
 select count(distinct pvrg.userid) as cnt1,
-sum(case when #tmp2.validatedate is not null and datediff(day, #tmp2.validatedate, pvrg.validatedate) < 90
+sum(case when #tmp2.validatedate is not null and datediff(day, #tmp2.validatedate, GETDATE()) < 90
 then 1 else 0 end) as cnt2
 from ppdai_vd..phonevalidateregs pvrg
 left join #tmp2 on pvrg.userid = #tmp2.userid and #tmp2.num = 1
-where pvrg.validatestatusid = 2
+where pvrg.validatestatusid = 2 and pvrg.IsView = 1
 
-3.
-select pvrg.userid, pvrg.validatedate, pvrg.validatestatusid
+--/******3.	
+select pvrg.userid, pvrg.validatedate, pvrg.validatestatusid, pvrg.isview,
 row_number() over(partition by pvrg.userid order by pvrg.validatedate desc) num
-into #tmp3
+into #tmp3 --select * from #tmp3 --drop table #tmp3
 from ppdai_vd..phonevalidateregs pvrg
 
 
-select *
+select COUNT(distinct #tmp3.UserId) --8
 from ppdai_vd..creditinvestigatecases cic
 inner join ppdai..listing l on cic.listingid = l.listingid
 inner join #tmp3 on l.borrowerid = #tmp3.userid and #tmp3.num = 1
-where cic.creditstatusid = 3 and #tmp3.validatestatusid = 2
+where cic.creditstatusid = 3 --征信2列表退回
+and #tmp3.validatestatusid = 2 and #tmp3.IsView = 1--征信1手机实名仍待审
 
-4.
-select sum(case when datediff(day, cic.creationdate, getdate()) >= 5 then 1 else 0 end) as cnt
-from ppdai_vd..creditinvestigatecases cic
-where cic.validatestatusid = 2
+--/******4.
+--待审手机 and 从记录生成到当前时间大于5天 --1461
+select sum(case when datediff(day, pvrg.creationdate, getdate()) >= 5 then 1 else 0 end) as cnt
+from ppdai_vd..phonevalidateregs pvrg
+where pvrg.validatestatusid = 2 and pvrg.IsView = 1 --征信待审的手机认证
+
+
+
+-------------------------------
+---只关注一次用户情况
+-------------------------------
+	
+--preprocessing
+select pvrg.userid, pvrg.validatedate,
+row_number() over(partition by pvrg.userid order by pvrg.validatedate desc) num
+into #phnsuc --select * from #phnsuc --drop table #phnsuc
+from ppdai_vd..phonevalidateregs pvrg
+where pvrg.validatestatusid = 1 --通过的手机认证
+
+select COUNT(distinct pvrg.UserId) cnt --111
+from ppdai_vd..PhoneValidateRegs pvrg
+inner join #phnsuc on pvrg.UserId = #phnsuc.UserId and #phnsuc.num = 1
+and pvrg.ValidateStatusId = 2 and pvrg.IsView = 1 --征信待审的手机认证
+
+
+
+-------------------------------
+---
+-------------------------------
+
+--1.2. 征信列表待审3625个, 其中之前手机认证成功过的有623个
+select COUNT(*) as cnt --手机征信待审 --3625
+--into #tmp1 --select * from #tmp1 --drop table #tmp1
+from ppdai_vd..CreditInvestigateCases cic
+inner join ppdai..listing l on cic.ListingId = l.ListingID
+and cic.CreditStatusId in (0) and l.StatusID in (0, 1)
+
+select pvrg.userid, pvrg.validatedate,
+row_number() over(partition by pvrg.userid order by pvrg.validatedate desc) num
+into #tmp2 --select * from #tmp2 --drop table #tmp2
+from ppdai_vd..phonevalidateregs pvrg
+where pvrg.validatestatusid = 1 --通过的手机认证
+
+select COUNT(cic.ListingId) cntlisting, --3625
+SUM(case when #tmp2.userid is not null then 1 else 0 end) as cntPreSucPhn --623
+from ppdai_vd..CreditInvestigateCases cic
+inner join ppdai..listing l on cic.ListingId = l.ListingID 
+and cic.CreditStatusId in (0) and l.StatusID in (0, 1)
+left join #tmp2 on l.BorrowerID = #tmp2.UserId and #tmp2.num = 1
+
+select COUNT(cic.ListingId) cntlisting, --3625
+SUM(case when datediff(day, #tmp2.ValidateDate, GETDATE()) < 93 then 1 else 0 end)
+as cntPreSucPhnWithn3Mon --623
+from ppdai_vd..CreditInvestigateCases cic
+inner join ppdai..listing l on cic.ListingId = l.ListingID 
+and cic.CreditStatusId in (0) and l.StatusID in (0, 1)
+left join #tmp2 on l.BorrowerID = #tmp2.UserId and #tmp2.num = 1
+
+--select pvrg.userid, pvrg.validatedate,
+--row_number() over(partition by pvrg.userid order by pvrg.validatedate desc) num
+--into #tmp3 --select * from #tmp3 --drop table #tmp3
+--from ppdai_vd..phonevalidateregs pvrg
+--where pvrg.validatestatusid  1 --之前有手机认证记录
+
+
+
+-------------------------------
+---
+-------------------------------
 
 
 
