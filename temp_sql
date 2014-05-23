@@ -182,7 +182,42 @@ left join #tmp2 on l.BorrowerID = #tmp2.UserId and #tmp2.num = 1
 -------------------------------
 
 
+select UserId into #temptable1 from ppdai_vd.dbo.CreditInvestigateCases
+where CreditStatusId=0
+and UserId in 
+(
+select UserId from ppdai_vd.dbo.PhoneValidateRegs
+where  ValidateStatusId=2 
+and IsView=1
+)
 
+
+select temp.userid,temp.ValidateStatusId  from
+(
+select UserId, row_number() over(partition by userid order by validatedate desc) num,id,ValidateStatusId,
+ReasonId
+from ppdai_vd.dbo.PhoneValidateRegs
+where UserId in
+(
+select UserId from #temptable1
+)
+and ValidateStatusId in (0,1) and ValidateDate>'2014-3-23'
+)temp 
+where temp.num=1 and temp.ValidateStatusId=1
+
+
+select temp.userid,temp.ValidateStatusId,temp.ReasonId  from
+(
+select UserId, row_number() over(partition by userid order by validatedate desc) num,id,ValidateStatusId,
+ReasonId,AuditTypeId
+from ppdai_vd.dbo.PhoneValidateRegs
+where UserId in
+(
+select UserId from #temptable1
+)
+and ValidateStatusId in (0,1) and ValidateDate>'2014-3-23'
+)temp 
+where temp.num=1 and temp.ValidateStatusId=0 and temp.ReasonId=7 and temp.AuditTypeId=2
 
 
 
