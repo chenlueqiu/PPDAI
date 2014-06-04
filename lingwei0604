@@ -1,0 +1,199 @@
+	
+--部门_风控_审核_营销过渡用户具体数据
+	
+	
+select distinct a.UserID ,ud.username,l.listingid,	
+case when l.StatusID IN (0,2) then '审核中' when l.StatusID=1 then '进行中'	
+when l.StatusID=3 then '流标' when l.StatusID=4 then '成功'	
+when l.StatusID=5 then '审核失败' when l.StatusID=10 then '撤回'	
+when l.StatusID=12 then '成功且已还清' else '草稿' end as '最后一个列表状态'	
+into #tmp1	
+from ppdai.dbo.Account as a	
+inner join ppd.dbo.UserDetails as ud on a.UserID=ud.UserId	
+inner join ppdai.dbo.[User] as u on u.UserID=ud.UserId	
+left join ppdai.dbo.LenderStat as ls on ls.LenderID =a.UserID	
+inner join ppdai..BorrowerStat bs on bs.Borrowerid=a.UserID	
+inNer join (select * from (select l.BorrowerID ,l.StatusID ,l.ListingID	
+,ROW_NUMBER()over(partition by l.borrowerid order by l.creationdate desc) as rownumber	
+from ppdai.dbo.listing as l ) as l	
+where l.rownumber=1 ) as l on a.userid=l.borrowerid	
+inner join (select distinct BorrowerId from ppdai.dbo.ListLoanTotal )as llt on a.UserID=llt.BorrowerId	
+where a.MaxListAmount<=20000 and bs.default_30=0	
+and not exists (select distinct l.BorrowerID	
+from (	
+select l.*	
+,ROW_NUMBER()over(partition by l.borrowerid order by l.creationdate desc) as rownumber	
+from ppdai.dbo.listing as l	
+inner join ppdai_new.dbo.NewListTypes2 as nlt2 on l.newlisttypeid=nlt2.NewListTypeId2 ) as l	
+where l.rownumber=1 and l.newlisttypeid in (3,4,10,11,15,20)	
+ and a.userid=l.BorrowerID )	
+and not exists	
+ (select * from ppdai.dbo.ListLoanTotal as llt where llt.OwingAmount>0 and	
+DATEDIFF(DAY,llt.NextRepayDate,GETDATE())>0 and llt.BorrowerId=ud.UserId )	
+and not exists (select * from ppdai_audit.dbo.FraudCheckUser as f where ud.IdNumber=f.IDNumber or	
+ud.MobilePhone=f.MobilePhone )	
+ and a.UserID not in --失败原因不包含	
+      (select l.BorrowerID	
+       from ppdai_audit.dbo.AuditRecords as ar	
+       inner join ppdai.dbo.Listing as l on ar.ListingId=l.ListingID	
+       where ar.ReasonId in (16,18,46,52,60,61,67,57,58))	
+  and a.UserID not in --排除内部用户 regsourceId=33	
+      (select UserID from ppd.dbo.UserDetails where RegsourceId=33)	
+      and u.IsDelete=0 --排除已注销账户	
+and ISNULL(ls.AmountLent,0)-ISNULL(bs.AmountTotalBorrowed,0)<=2000 --排除借出-借入>2000的客户	
+and (ud.Age >=20 and ud.Age <=55) --排除<20, >55的用户	
+and not exists --排除当前在黑名单用户	
+      (select * from ppdai_audit.dbo.FraudCheckUser as f	
+       where f.IDNumber =ud.IdNumber and f.MobilePhone =ud.MobilePhone)	
+and a.userid not in (select distinct bs.BorrowerID	
+from ppdai.dbo.BorrowerStat as bs	
+inner join ppdai.dbo.listing as l on bs.Borrowerid=l.BorrowerID	
+where (l.Vouch>0 or l.newlisttypeid2=1)and bs.suc_total=1	
+) ---排除只成功一次，且为体验标或纳米标客户	
+	
+	
+	
+select l.BorrowerID ,MIN(l.AuditingDate) as '首笔成功列表成交时间'	
+into #tmp2	
+from ppdai.dbo.listing as l	
+inner join #tmp1 as a on l.BorrowerID=a.UserId	
+where l.StatusID in (4,12)	
+group by l.BorrowerID	
+	
+select l.BorrowerID ,COUNT(*) as '历史成功列表笔数'	
+into #tmp3	
+from ppdai.dbo.listing as l	
+inner join #tmp1 as a on l.BorrowerID=a.UserId	
+where l.StatusID in (4,12)	
+group by l.BorrowerID	
+	
+	
+select llt.BorrowerId ,SUM(OwingAmount) as '当前负债'	
+into #tmp4	
+from ppdai.dbo.ListLoanTotal as llt	
+inner join #tmp1 as a on llt.BorrowerID=a.UserId	
+grOup by llt.BorrowerId	
+	
+	
+select ud.UserId	
+,a.ListAmount+a.ListAddAmount-a.ListAmountMinus as '现有额度',	
+a.MaxListAmount as '目标额度'	
+,a.ListAddAmount as '追加额度'	
+into #tmp5	
+from ppd.dbo.UserDetails as ud	
+inner join #tmp1 as aa on ud.userid=aa.UserId	
+left join ppdai.dbo.Account as a on ud.UserId=a.UserID	
+	
+-----	
+select l.BorrowerID as userid, MAX(l.creationdate) creationdate into #tmp6	
+from ppdai..listing l group by l.BorrowerID	
+	
+select id5.UserId, id5.UserName into #tmp7	
+from ppdai..ID5_EduInfos id5	
+	
+select distinct BorrowerId as userid into #tmp8	
+from ppdai..ListLoan ll	
+where DATEDIFF(day, ll.duedate, getdate()) < 185	
+and DATEDIFF(day, ll.duedate, ll.paymentdate) >= 5	
+	
+--SELECT cll.userid, MAX(cll.CreationDate) addamtDate  --into #tmp9	
+--FROM [ppdai_related].[dbo].[CreditLimitLogs] cll	
+--where cll.Description like '%追加%'	
+#NAME?	
+	
+select t.UserId, MAX(t.creationdate) addamtdate 	
+into #tmp9	
+from	
+(	
+	select cll.UserId, cll.CreationDate
+	FROM [ppdai_related].[dbo].[CreditLimitLogs] cll
+	where cll.Description like '%追加%'
+	union
+	SELECT uir.UserId, uir.CreationDate
+	FROM [ppdai_audit].[dbo].[UserInternalRecord] uir
+	where Body like '%过度营销用户，临时增加额度2k%'
+) t	
+group by t.UserId	
+	
+	
+-----	
+	
+	
+select distinct a1.UserName as '用户名',a1.UserID ,a1.ListingID ,	
+convert(nvarchar(10), a2.首笔成功列表成交时间, 120) 首笔成功列表成交时间,	
+a3.历史成功列表笔数,a4.当前负债,a5.现有额度,	
+a5.目标额度,a5.追加额度,convert(nvarchar(10), #tmp9.addamtdate, 120) '最后一次追加额度时间', 	
+a1.最后一个列表状态, convert(nvarchar(10), #tmp6.creationdate, 120) '最后一次列表申请时间',	
+case when #tmp7.UserId is not null then 'yes' else 'no' end as '是否通过学历认证',	
+case when #tmp8.userid is not null then 'yes' else 'no' end as '是否近半年有过逾期超过5天的纪录',	
+case when a6.ListingId is not null then 1 else 0 end as '规则四(有房)',	
+case when a7.ListingId is not null then 1 else 0 end as '规则二(有车)',	
+case when a8.ListingId is not null then 1 else 0 end as '规则三(高学历)',	
+case when a9.ListingId IS not null then 1 else 0 end as '规则五(营业执照)',	
+case when a10.ListingId is not null then 1 else 0 end as '规则六(支付宝)',	
+case when a11.ListingId is not null then 1 else 0 end as '信用评级C+，且无欺诈嫌疑',	
+case when #tmp6.creationdate > #tmp9.addamtdate then 'yes' else 'no' end as '最后一次列表申请在最后一次追加额度之后'	
+from #tmp1 as a1	
+left join #tmp2 as a2 on a1.UserId=a2.BorrowerID	
+left join #tmp3 as a3 on a1.UserId=a3.BorrowerID	
+left join #tmp4 as a4 on a1.UserId=a4.Borrowerid	
+left join #tmp5 as a5 on a1.UserId=a5.UserId	
+left join #tmp6 on a1.UserID = #tmp6.userid	
+left join #tmp7 on a1.UserID = #tmp7.UserId	
+left join #tmp8 on a1.UserID = #tmp8.userid	
+left join #tmp9 on a1.UserID = #tmp9.UserId	
+left join (SELECT distinct a.ListingId	
+  FROM [ppdai_audit].[dbo].[AuditRecords] as a	
+  inner join [ppdai_audit].[dbo].[AuditConclusions] as b on a.ReasonId =b.Id	
+  where b.StatusId=1 and b.Id=40) as a6 on a1.ListingID=a6.ListingId	
+left join (SELECT distinct a.ListingId	
+  FROM [ppdai_audit].[dbo].[AuditRecords] as a	
+  inner join [ppdai_audit].[dbo].[AuditConclusions] as b on a.ReasonId =b.Id	
+  where b.StatusId=1 and b.Id=24) as a7 on a1.ListingID=a7.ListingId	
+left join (SELECT distinct a.ListingId	
+  FROM [ppdai_audit].[dbo].[AuditRecords] as a	
+  inner join [ppdai_audit].[dbo].[AuditConclusions] as b on a.ReasonId =b.Id	
+  where b.StatusId=1 and b.Id=25) as a8 on a1.ListingID=a8.ListingId	
+left join (SELECT distinct a.ListingId	
+  FROM [ppdai_audit].[dbo].[AuditRecords] as a	
+  inner join [ppdai_audit].[dbo].[AuditConclusions] as b on a.ReasonId =b.Id	
+  where b.StatusId=1 and b.Id=41) as a9 on a1.ListingID=a9.ListingId	
+left join (SELECT distinct a.ListingId	
+  FROM [ppdai_audit].[dbo].[AuditRecords] as a	
+  inner join [ppdai_audit].[dbo].[AuditConclusions] as b on a.ReasonId =b.Id	
+  where b.StatusId=1 and b.Id=42) as a10 on a1.ListingID=a10.ListingId	
+left join (select ListingId from ppdai_vd.dbo.UserCreditScoreStorage as uc	
+where uc.TotalCreditScore>=280) as a11 on a1.ListingID=a11.ListingId	
+where a5.追加额度 > 4000	
+--where a2.首笔成功列表成交时间>=@begindate and a2.首笔成功列表成交时间<dateadd(day,1,@enddate)	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+--drop table #tmp1	
+--drop table #tmp2	
+--drop table #tmp3	
+--drop table #tmp4	
+--drop table #tmp5 	
+
+
+
+
+--部门_运营_二次用户登录转化率
+
+select a.RecordDate as 日期,COUNT(*) as 二次可发标用户数,
+COUNT(a.LoginDate) as 登陆二次用户数,COUNT(a.VisitCreatePage) as 访问创建列表页面数,
+COUNT(a.SucCreateListDate) as 成功发布数,
+case when COUNT(*)=0 then 0 else COUNT(a.LoginDate)*1./COUNT(*) end as 登陆二次用户比,
+case when COUNT(a.LoginDate)=0 then 0 else COUNT(a.VisitCreatePage)*1./COUNT(a.LoginDate) end as 访问创建列表页面比,
+case when COUNT(a.VisitCreatePage)=0 then 0 else COUNT(a.SucCreateListDate)*1./COUNT(a.VisitCreatePage) end as 发标比
+from ppdai.dbo.potential_borrower_Analysis as a
+where cast(a.IsExperience as int)=0
+group by a.RecordDate
+order by 1 desc
