@@ -1,0 +1,85 @@
+------------------------------------------------------------------
+--select * FROM [ppdai_audit].[dbo].[AuditType]
+--select * from ppdai_vd..PhoneValidateRegs where userid = 1070500--order by 1 desc
+--select  * from ppdai_vd..PhoneValidateReasons
+--select top 100 * from [ppdai_audit].[dbo].[AuditListType] where UserID = 225 and TypeID = 33 and IsPass = 1 
+
+
+select 
+pvrg.CustomerTypeId, pvrg.UserId, pvr.[Description], pvr.AuditTypeId, pvr.ReasonId, 
+pvrg.AdminUserId, alt.IsPass, alt.CreationDate, pvrg.ValidateDate
+into #t --select * from #t --drop table #t
+from ppdai_vd..PhoneValidateRegs pvrg
+inner join ppdai_vd..PhoneValidateReasons pvr
+on pvrg.AuditTypeId = pvr.AuditTypeId and pvrg.ReasonId = pvr.ReasonId
+inner join ppdai_audit..AuditListType alt
+on alt.TypeID = 33 and alt.UserID = pvrg.UserId
+where (pvr.AuditTypeId = 3 or (pvr.AuditTypeId = 1 and pvr.ReasonId = 5)
+or (pvr.AuditTypeId = 2 and pvr.ReasonId in (6, 7, 12, 13, 14)))
+and pvrg.ValidateDate > @s
+and pvrg.ValidateDate < DATEADD(DAY, 1, @e)
+
+
+--select #t.UserId, COUNT(*)
+--from #t
+--group by #t.UserId
+--select UserId, COUNT(*) from ppdai_vd..PhoneValidateRegs group by UserId 
+--select * from #t order by CreationDate
+
+select 
+case when #t.CustomerTypeId = 1 then 'A'
+when #t.CustomerTypeId = 2 then 'B'
+when #t.CustomerTypeId = 3 then 'C'
+when #t.CustomerTypeId = 4 then 'D'
+when #t.CustomerTypeId = 5 then 'E'
+else 'others' end as '客户分类',
+isnull(ud.RealName, 'System') as '征信Owner',
+sum(case when #t.AuditTypeId = 3 and #t.ReasonId = 4 then 1 else 0 end)
+as '系统自动上传',
+sum(case when #t.AuditTypeId = 3 and #t.ReasonId = 1 then 1 else 0 end)
+as '用户提交认证且密码正确',
+sum(case when #t.AuditTypeId = 3 and #t.ReasonId = 2 then 1 else 0 end)
+as '用户提交认证但密码错误',
+sum(case when #t.AuditTypeId = 3 and #t.ReasonId = 3 then 1 else 0 end)
+as '用户未提交手机认证',
+sum(case when #t.AuditTypeId = 2 and #t.ReasonId = 7 then 1 else 0 end)
+as '手机使用正常但非实名',
+sum(case when #t.AuditTypeId = 1 and #t.ReasonId = 5 then 1 else 0 end)
+as '非正常使用手机3个月以上',
+sum(case when #t.AuditTypeId = 2 and #t.ReasonId = 6 then 1 else 0 end)
+as '手机正常使用但不足3个月',
+sum(case when #t.AuditTypeId = 2 and #t.ReasonId = 12 then 1 else 0 end)
+as '连续3天无法联系',
+sum(case when #t.AuditTypeId = 2 and #t.ReasonId = 13 then 1 else 0 end)
+as '自行放弃',
+sum(case when #t.AuditTypeId = 2 and #t.ReasonId = 14 then 1 else 0 end)
+as '营业厅系统问题'
+--into #t2
+from #t left join [ppdai_Admin].[dbo].[PPDUser] ud 
+on #t.AdminUserId = ud.UserId --and ud.Remark = '征信'
+group by 
+case when #t.CustomerTypeId = 1 then 'A'
+when #t.CustomerTypeId = 2 then 'B'
+when #t.CustomerTypeId = 3 then 'C'
+when #t.CustomerTypeId = 4 then 'D'
+when #t.CustomerTypeId = 5 then 'E'
+else 'others' end,
+isnull(ud.RealName, 'System')
+--order by 1, 2
+
+
+---
+
+--select #t.*, ud.*
+--from #t inner join [ppdai_Admin].[dbo].[PPDUser] ud 
+--on #t.AdminUserId = ud.UserId and ud.Remark = '征信'
+--where ud.RealName = '马青'
+--order by #t.CreationDate
+
+
+--select alt.CreationDate, pvrg.CreationDate, pvrg.ValidateDate, pvrg.SubmitDate, pvrg.OwnerDate, * 
+--from ppdai_audit..AuditListType alt
+--inner join ppdai_vd..PhoneValidateRegs pvrg
+--on alt.UserID = pvrg.UserId
+--where alt.TypeID = 33
+--and YEAR(alt.creationdate) = 2014
